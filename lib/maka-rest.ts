@@ -16,8 +16,12 @@ interface MakaRestOptions {
   isRoot?: boolean; // If true, this instance represents the root of the API
   prettyJson: boolean;
   auth: {
-    token: string;
+    token?: string;
+    loginType: IMakaRest.LoginType;
     user: (http: IncomingMessage) => { token?: string };
+    onLoggedIn: (req: IncomingMessage) => {},
+    onLoggedOut: (req: IncomingMessage) => {},
+    onLoginFailure: (req: IncomingMessage, reason?: string) => {}
   };
   defaultHeaders: Record<string, string>;
   enableCors: boolean;
@@ -169,7 +173,7 @@ class MakaRest {
         'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept'
       };
 
-      if (MakaRest.auth.loginType === 'default') {
+      if (this._config.auth.loginType === 'default') {
         corsHeaders['Access-Control-Allow-Headers'] += ', Authorization, X-Auth-Token';
       }
 
@@ -219,7 +223,7 @@ class MakaRest {
   }
 
   private initializeDefaultAuthEndpoints(): void {
-    if (MakaRest.auth.loginType === 'default') {
+    if (this._config.auth.loginType === 'default') {
       console.debug('MAKA REST: Initializing default auth endpoints');
       this.addRoute('login', { onRoot: true, authRequired: false }, {
         post: async (incomingMessage: IncomingMessage) => { return await this.login(incomingMessage) }
@@ -244,11 +248,11 @@ class MakaRest {
       const searchQuery = { [this._config.auth.token]: Accounts._hashLoginToken(auth.authToken) };
       const user = await Meteor.users.findOneAsync({ '_id': auth.userId }, searchQuery);
       if (!user) {
-        MakaRest.auth.onLoginFailure?.(incomingMessage, 'Error attempting login');
+        this._config.auth.onLoginFailure?.(incomingMessage, 'Error attempting login');
         return Codes.badRequest400('Error attempting login')
       }
       Object.assign(incomingMessage, { user });
-      MakaRest.auth.onLoggedIn?.(incomingMessage);
+      this._config.auth.onLoggedIn?.(incomingMessage);
       return Codes.success200(auth);
     }
 
@@ -277,7 +281,7 @@ class MakaRest {
     );
 
     // Call the logout hook if it's defined
-    MakaRest.auth.onLoggedOut?.(incomingMessage);
+    this._config.auth.onLoggedOut?.(incomingMessage);
     return Codes.success200('Logged out successfully');
   }
 
@@ -287,7 +291,7 @@ class MakaRest {
     await Meteor.users.updateAsync(user._id, { $set: { 'services.resume.loginTokens': [] } });
 
     // Call the logout hook if it's defined
-    MakaRest.auth.onLoggedOut?.(incomingMessage);
+    this._config.auth.onLoggedOut?.(incomingMessage);
     return Codes.success200('Logged out from all devices successfully');
   }
 }
